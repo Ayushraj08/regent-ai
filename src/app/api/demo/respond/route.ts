@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("API /demo/respond Error:", error);
     return NextResponse.json(
-      { error: "Failed to process utterance" },
+      { error: "Failed to process utterance", details: String(error) },
       { status: 500 }
     );
   }

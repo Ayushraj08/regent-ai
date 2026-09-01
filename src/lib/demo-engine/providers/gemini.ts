@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { EngineRequest, NLUResponse, NLUResponseSchema } from "../types";
+import { NLUResponse, NLUResponseSchema } from "../types";
 import { LLMProvider, ProviderError, FailureClassification } from "./types";
 import { ServiceCatalog } from "../config/taxonomy";
 
@@ -22,56 +22,66 @@ export class GeminiProvider implements LLMProvider {
     return `GoogleGenAI (${this.modelName})`;
   }
 
-  async generate(request: EngineRequest, options: { signal: AbortSignal }): Promise<NLUResponse> {
-    const { state, trade, lead, utterance } = request;
-    const catalogStr = trade && ServiceCatalog[trade] ? JSON.stringify(ServiceCatalog[trade], null, 2) : "Unknown Trade Catalog";
+  async generate(request: any, options: { signal: AbortSignal }): Promise<NLUResponse> {
+    const { state, trade, lead, utterance, turnCount = 0 } = request;
+    const catalogStr = trade && ServiceCatalog[trade]
+      ? JSON.stringify(
+          ServiceCatalog[trade].map((s: any) => ({
+            id: s.id,
+            displayName: s.displayName,
+            requestTypes: s.supportedRequestTypes ?? s.requestTypes,
+            aliases: s.aliases?.slice(0, 8)
+          })),
+          null, 2
+        )
+      : "Trade not specified";
 
-    const systemInstruction = `You are the Natural Language Understanding (NLU) layer for Regent.
-Your ONLY job is to extract structured intent, behavior, lead fields, and safety flags from the user's utterance.
-Do NOT decide the next state or the response text. The State Controller will handle that.
+    const systemInstruction = `You are the Natural Language Understanding (NLU) layer for Regent, a home-services AI.
+Your ONLY job is to extract structured intent, behavior, lead fields, and safety flags from the customer's utterance.
+Do NOT decide the next state or response text — the State Controller handles that.
 
 BUSINESS CONFIGURATION:
-- Industry: ${trade}
-- Service Catalog: ${catalogStr}
+- Industry: ${trade ?? "Unknown"}
+- Service Catalog (CRITICAL — map customer language to these IDs):
+${catalogStr}
 
 INTENTS:
-NEW_SERVICE_REQUEST, EXISTING_CUSTOMER, EMERGENCY, HUMAN_REQUEST, PRICE_QUESTION, HOURS_QUESTION, SERVICE_AREA_QUESTION, STATUS_QUESTION, CANCELLATION, RESCHEDULE, GENERAL_QUESTION, COMPLAINT, WRONG_NUMBER, SPAM_OR_ABUSE, OFF_TOPIC, UNSURE, OTHER
+NEW_SERVICE_REQUEST, EXISTING_CUSTOMER, EMERGENCY, HUMAN_REQUEST, PRICE_QUESTION, HOURS_QUESTION, SERVICE_AREA_QUESTION, STATUS_QUESTION, CANCELLATION, RESCHEDULE, GENERAL_QUESTION, SOCIAL_QUESTION, COMPLAINT, WRONG_NUMBER, SPAM_OR_ABUSE, OFF_TOPIC, UNSURE, PROVIDE_INFORMATION, END_CALL, OTHER
 
-REQUEST TYPES:
+REQUEST TYPES (SEPARATE from service):
 REPAIR, INSTALLATION, REPLACEMENT, MAINTENANCE, INSPECTION, DIAGNOSTIC, UPGRADE, ESTIMATE, GENERAL_SERVICE, EMERGENCY, OTHER, UNKNOWN
 
 BEHAVIORS:
 CALM, NEUTRAL, POSITIVE, CONFUSED, ANXIOUS, FRUSTRATED, ANGRY, RESISTANT, RUSHED, UNCERTAIN, DISTRESSED, HOSTILE, COOPERATIVE, UNCOOPERATIVE, TALKATIVE, MINIMAL, OFF_TOPIC
 
-SAFETY:
-Categorize if dangerous. NORMAL, ELEVATED, CRITICAL, UNKNOWN. (e.g., GAS_SUSPECTED, FIRE).
-
 EXTRACTION RULES (CRITICAL):
-1. SEPARATE INTENT vs REQUEST TYPE vs SERVICE: If a user says "I bought an AC and need it installed", Intent is NEW_SERVICE_REQUEST, RequestType is INSTALLATION, and Service is AC_INSTALLATION (map to Catalog ID).
-2. LISTEN BROADLY: Extract ALL relevant fields (name, phone, address, requestType, service, problem, urgency) that the user volunteers in a single pass. Do not wait for them to be explicitly asked.
-3. CORRECTIONS: If the user corrects previously captured information, update ONLY that specific field. Preserve all other existing fields exactly as they are in the Known Lead Info.
-4. SILENCE/CONFUSION: If the user is silent or says "I don't know", classify intent as UNSURE and behavior as CONFUSED.
-5. SEMANTIC SERVICE MAPPING: Map colloquial phrases (e.g., "put my new AC in", "hook up this air conditioner") to the closest formal Catalog ID (e.g. "AC_INSTALLATION").
-6. Status must be one of: CAPTURED, REFUSED, UNKNOWN, NOT_APPLICABLE. You must return confidence scores.
+1. SEPARATE intent vs requestType vs service:
+   - "I need AC installation" → requestType=INSTALLATION, service=AC_INSTALLATION
+   - "My AC stopped cooling" → requestType=REPAIR, service=AC_REPAIR
+   - "I want to service my AC" → requestType=MAINTENANCE, service=AC_MAINTENANCE
+2. Map colloquial phrases to Catalog IDs using the aliases provided.
+3. Extract ALL fields mentioned in one utterance.
+4. OMIT fields NOT mentioned. Status: CAPTURED, REFUSED, UNKNOWN, NOT_APPLICABLE.
+5. Include confidence scores.
+6. Set isCorrection=true if the customer is correcting a previously given field.
 
-JSON FORMAT:
-You MUST return ONLY a valid JSON object matching this structure:
+JSON FORMAT — return ONLY this structure:
 {
-  "intent": "...",
-  "behavior": "...",
-  "confidence": 0.9,
+  "intent": "NEW_SERVICE_REQUEST",
+  "behavior": "CALM",
+  "confidence": 0.95,
   "extracted": {
-    "service": { "value": "...", "status": "CAPTURED", "confidence": 0.9, "turn": ${request.turnCount} }
+    "name": { "value": "Ayush", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "requestType": "INSTALLATION",
+    "service": "AC_INSTALLATION"
   },
-  "safety": {
-    "status": "NORMAL",
-    "category": null,
-    "confidence": 0.99
-  }
+  "safety": { "status": "NORMAL", "category": null, "confidence": 0.99 },
+  "isCorrection": false,
+  "correctionField": null
 }`;
 
     const historyStr = request.conversationHistory
-      ? request.conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')
+      ? request.conversationHistory.map((m: { role: string; content: string }) => `${m.role}: ${m.content}`).join('\n')
       : "No history yet.";
 
     const prompt = `Current State: ${state}
@@ -107,7 +117,22 @@ Extract the intent, behavior, safety, and updated fields.`;
 
       const validation = NLUResponseSchema.safeParse(parsedJson);
       if (!validation.success) {
-        throw this.createError(`Schema mismatch: ${validation.error.message}`, 'APPLICATION_ERROR');
+        // Try coercion
+        const coerced = { ...parsedJson };
+        if (coerced.extracted) {
+          coerced.extracted = { ...coerced.extracted };
+          if (typeof coerced.extracted.requestType === "object" && coerced.extracted.requestType !== null) {
+            coerced.extracted.requestType = coerced.extracted.requestType.value || null;
+          }
+          if (typeof coerced.extracted.service === "object" && coerced.extracted.service !== null) {
+            coerced.extracted.service = coerced.extracted.service.value || null;
+          }
+        }
+        const retry = NLUResponseSchema.safeParse(coerced);
+        if (!retry.success) {
+          throw this.createError(`Schema mismatch: ${validation.error.message}`, 'APPLICATION_ERROR');
+        }
+        return retry.data;
       }
 
       return validation.data;

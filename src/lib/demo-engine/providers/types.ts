@@ -1,4 +1,4 @@
-import { EngineRequest, NLUResponse } from "../types";
+import { NLUResponse } from "../types";
 
 export type FailureClassification = 
   | 'TRANSIENT_TIMEOUT' 
@@ -17,7 +17,8 @@ export interface ProviderError extends Error {
 
 export interface LLMProvider {
   id: string;
-  generate(request: EngineRequest, options: { signal: AbortSignal }): Promise<NLUResponse>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  generate(request: any, options: { signal: AbortSignal }): Promise<NLUResponse>;
   getName(): string;
 }
 

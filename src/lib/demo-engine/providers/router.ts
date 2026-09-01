@@ -1,4 +1,4 @@
-import { EngineRequest, NLUResponse } from "../types";
+import { NLUResponse } from "../types";
 import { LLMProvider, ProviderError, TelemetryData } from "./types";
 import { CircuitBreaker } from "./circuit-breaker";
 
@@ -16,7 +16,8 @@ export class ProviderRouter {
     this.timeBudgetMs = timeBudgetMs;
   }
 
-  async route(request: EngineRequest, turnId: string, globalStartTime: number): Promise<{ nlu: NLUResponse, telemetry: Partial<TelemetryData> }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async route(request: any, turnId: string, globalStartTime: number): Promise<{ nlu: NLUResponse, telemetry: Partial<TelemetryData> }> {
     const telemetry: Partial<TelemetryData> = {
       turn_id: turnId,
       fallback_used: false,
@@ -85,7 +86,7 @@ export class ProviderRouter {
 
         breaker.recordFailure(providerError.classification || 'SERVER_ERROR');
 
-        if (providerError.classification === 'CONFIGURATION_ERROR' || providerError.classification === 'APPLICATION_ERROR') {
+        if (providerError.classification === 'CONFIGURATION_ERROR') {
           if (providerError.message.includes("missing") || providerError.message.includes("UNAVAILABLE")) {
             console.warn(`[ROUTER] ${provider.id} configuration missing, skipping...`);
             continue;

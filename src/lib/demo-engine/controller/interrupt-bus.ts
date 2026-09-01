@@ -1,5 +1,3 @@
-import { EngineRequest } from "../types";
-
 export type InterruptResult = {
   triggered: boolean;
   action?: 'SAFETY_ESCALATE' | 'HUMAN_TRANSFER' | 'END_CALL' | 'CANCEL' | 'RESTART';
@@ -7,26 +5,10 @@ export type InterruptResult = {
   response?: string;
 };
 
-export function evaluateGlobalInterrupts(request: EngineRequest): InterruptResult {
+export function evaluateGlobalInterrupts(request: { utterance: string; session?: { state?: string } }): InterruptResult {
   const utt = request.utterance.toLowerCase().trim();
 
-  // 1. SAFETY - Highest priority
-  if (
-    utt.includes("fire") ||
-    utt.includes("smoke") ||
-    utt.includes("sparking") ||
-    utt.includes("gas") ||
-    utt.includes("flooding") ||
-    utt.includes("burning") ||
-    utt.includes("burst pipe")
-  ) {
-    return {
-      triggered: true,
-      action: 'SAFETY_ESCALATE',
-      reason: 'CRITICAL_SAFETY',
-      response: "This sounds like a serious safety concern. Please prioritize your safety and contact local emergency services if you are in any danger."
-    };
-  }
+  // Safety is now handled strictly by the LLM policy evaluation to prevent false positives.
 
   // 2. HUMAN REQUEST / STOP
   if (
