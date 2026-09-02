@@ -236,6 +236,12 @@ export default function DemoPage() {
 
   function handleUserInput(text: string, fromVoice = false) {
     if (!text.trim()) return;
+    // Block input when the call has officially ended — must start a new call
+    const terminalStates: AppState[] = ["COMPLETE", "ESCALATION"];
+    if (terminalStates.includes(appStateRef.current)) return;
+    // Also block if session is in a closed/ended state
+    const sessionState = sessionRef.current?.state;
+    if (sessionState === "CLOSED" || sessionState === "END") return;
     if (fromVoice) metricsRef.current.sttCommit = performance.now();
     currentAudioRef.current?.pause();
     currentAudioRef.current = null;
@@ -275,7 +281,7 @@ export default function DemoPage() {
       if (data.safety?.status === "CRITICAL" || data.shouldTransfer) {
         setAppState("ESCALATION");
         speakText(data.response);
-      } else if (data.session.state === "END") {
+      } else if (data.session.state === "END" || data.session.state === "CLOSED") {
         setAppState("COMPLETE");
         speakText(data.response);
       } else {
@@ -287,7 +293,7 @@ export default function DemoPage() {
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: "REGENT",
-        content: "I'm having a little trouble right now. Could you try again, or type your message?",
+        content: "Sorry, I had trouble processing that. Could you try again?",
       }]);
       setAppState("READY");
     }
@@ -538,7 +544,7 @@ export default function DemoPage() {
                       onChange={e => setTextInput(e.target.value)}
                       placeholder="Type your message or use the mic..."
                       disabled={appState === "PROCESSING"}
-                      className="flex-1 bg-slate/5 border border-slate/20 rounded-full px-4 text-sm focus:outline-none focus:border-regent" />
+                      className="flex-1 bg-slate/5 border border-slate/20 rounded-full px-4 text-sm focus:outline-none focus:border-regent disabled:opacity-50" />
                     <button type="submit" id="send-btn"
                       disabled={!textInput.trim() || appState === "PROCESSING"}
                       className="p-3 bg-regent text-bone rounded-full disabled:opacity-50">
@@ -682,7 +688,7 @@ export default function DemoPage() {
                   <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">Conversation</p>
                   <DiagRow label="State" value={session.state} ok={session.state !== "ESCALATED"} />
                   <DiagRow label="Intent" value={session.intent ?? "—"} ok={!!session.intent} />
-                  <DiagRow label="Action" value={session.currentAction} ok={session.currentAction !== "CLARIFY"} />
+                  <DiagRow label="Action" value={session.currentAction} ok={session.currentAction !== "CLARIFY_FIELD"} />
                   <DiagRow label="Turn" value={String(session.turnCount)} ok />
                   <DiagRow label="Behavior" value={session.customerBehavior} ok={session.customerBehavior !== "ANGRY"} />
                 </div>

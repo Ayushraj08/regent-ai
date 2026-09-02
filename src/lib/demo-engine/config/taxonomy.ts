@@ -558,7 +558,11 @@ export function findServiceByAlias(trade: string, text: string): ServiceDefiniti
 
   // 2. Partial alias match (alias is contained in the utterance)
   for (const svc of services) {
-    if (svc.aliases.some(alias => normalized.includes(alias))) {
+    if (svc.aliases.some(alias => {
+      // Use word boundaries to prevent 'ac' matching inside 'black' or 'fact'
+      const regex = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
+      return regex.test(normalized);
+    })) {
       return svc;
     }
   }

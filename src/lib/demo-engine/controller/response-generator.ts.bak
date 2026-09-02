@@ -1,6 +1,5 @@
 import { ConversationSession, Behavior, ActionType, Intent } from "../types";
 import { getServiceById } from "../config/taxonomy";
-import { GoogleGenAI } from "@google/genai";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -90,126 +89,16 @@ function getBusinessAnswer(intent: Intent | null): string {
   }
 }
 
-// ─── Main Response Generator (LLM) ─────────────────────────────────────────────
+// ─── Main Response Generator ───────────────────────────────────────────────────
 
-export async function generateResponse(
-  action: ActionType,
-  targetField: string | undefined,
-  behavior: Behavior,
-  missingFields: string[],
-  session: ConversationSession
-): Promise<string> {
-  if (!process.env.OPENROUTER_API_KEY) {
-    return generateResponseFallback(action, targetField, behavior, missingFields, session);
-  }
-
-  try {
-    let historyStr = session.conversationHistory
-      .map((m: { role: string; content: string }) => `${m.role}: ${m.content}`)
-      .join('\n');
-    
-    if (!historyStr) historyStr = "No history yet.";
-
-    let fieldDirective = "";
-    let invalidFieldRule = "";
-    if (targetField) {
-      fieldDirective = `The specific missing field you MUST ask for right now is: [${targetField}]. Do NOT ask for any other missing field (like address or email) until this specific field is captured!`;
-      const fieldData = (session.lead as any)[targetField];
-      
-      if (targetField === "name") {
-        fieldDirective += ` Ask for their full name as it appears on a valid identity card.`;
-      }
-      
-      if (fieldData && (fieldData.status === "INVALID" || fieldData.status === "AMBIGUOUS") && fieldData.validationReason) {
-        invalidFieldRule = `- CRITICAL: The customer's previous answer for ${targetField} was rejected because: "${fieldData.validationReason}". You MUST explicitly mention this reason to the customer when asking for the field again. Do NOT just ask for the field blindly!`;
-      }
-    }
-
-    let safeLeadInfo = JSON.parse(JSON.stringify(session.lead));
-    for (const key of Object.keys(safeLeadInfo)) {
-      if (safeLeadInfo[key]?.status === "INVALID" || safeLeadInfo[key]?.status === "AMBIGUOUS") {
-        safeLeadInfo[key].value = null; // Do not let the LLM use invalid values for personalization
-      }
-    }
-
-    let nameRule = "";
-    const nameStatus = safeLeadInfo.name?.status;
-    if (nameStatus === "CAPTURED" || nameStatus === "VALID" || nameStatus === "CONFIRMED" || nameStatus === "CORRECTED") {
-      const firstName = safeLeadInfo.name.value.split(" ")[0];
-    } else {
-      nameRule = `- CRITICAL: Do NOT address the customer by name. Start your response with a simple greeting like "Hello!" or "Hi!".`;
-    }
-
-    const systemInstruction = `You are Regent, an empathetic and professional AI receptionist for a home service business. 
-Your goal is to handle this call dynamically, smoothly, and like a real human receptionist.
-Do NOT sound like a robotic form-filler. Handle objections gracefully. Keep responses concise (1-2 sentences maximum).
-NEVER hallucinate business facts like pricing or exact hours—state that "the team can provide those details."
-
-CONTEXT:
-Customer Behavior/Mood: ${behavior}
-Current Intent: ${session.intent}
-Missing Fields: ${missingFields.join(', ')}
-Known Lead Info: ${JSON.stringify(safeLeadInfo)}
-
-YOUR DIRECTIVE:
-You must perform the action: [${action}]
-${fieldDirective}
-
-RULES:
-- If action=ESCALATE_SAFETY, tell them to hang up and call 911 immediately.
-- If action=HANDLE_HUMAN_REQUEST, tell them you are transferring them to a human agent.
-- If action=CLOSE_CALL, thank them and end the call (mention their ticket ID ${session.ticketId} if present).
-- If action=IDENTIFY_RETURNING_CUSTOMER, ask them for their ticket reference number or phone number so you can pull up their details.
-- If action=CONFIRM_LOOKUP, confirm you found their details.
-- If the customer is ANGRY or FRUSTRATED, acknowledge it with brief empathy ("I am so sorry you are dealing with this"). Do NOT repeat apologies if you've already apologized in previous turns.
-- If they ask an out-of-scope question, gently deflect and steer back to the target field. If they have done it 3 times (intent=OFF_TOPIC), warn them or end the call.
-${nameRule}
-${invalidFieldRule}
-- NEVER output JSON. Output ONLY the conversational response you would speak back to the customer.`;
-
-    const url = "https://openrouter.ai/api/v1/chat/completions";
-    const reqBody = {
-      model: "meta-llama/llama-3.1-8b-instruct",
-      messages: [
-        { role: "system", content: systemInstruction },
-        { role: "user", content: `Conversation History:\n${historyStr}\n\nBased on your directive, generate the next response:` }
-      ],
-      temperature: 0.3
-    };
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(reqBody)
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.choices && data.choices.length > 0) {
-        return data.choices[0].message.content.trim();
-      }
-    }
-  } catch (err) {
-    console.warn("[RESPONSE-GENERATOR] LLM failed, falling back to template:", err);
-  }
-
-  return generateResponseFallback(action, targetField, behavior, missingFields, session);
-}
-
-// ─── Fallback Response Generator (Templates) ───────────────────────────────────
-
-export function generateResponseFallback(
+export function generateResponse(
   action: ActionType,
   targetField: string | undefined,
   behavior: Behavior,
   missingFields: string[],
   session: ConversationSession
 ): string {
-  const isNameSettled = session.lead.name?.status === "CAPTURED" || session.lead.name?.status === "VALID" || session.lead.name?.status === "CONFIRMED" || session.lead.name?.status === "CORRECTED";
-  const firstName = isNameSettled ? session.lead.name?.value?.split(" ")[0] : undefined;
+  const firstName = session.lead.name?.value?.split(" ")[0];
   const nameCtx = firstName ? `, ${firstName}` : "";
   const angry = behavior === "ANGRY" || behavior === "HOSTILE";
   const rushed = behavior === "RUSHED" || behavior === "MINIMAL";

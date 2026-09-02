@@ -8,7 +8,7 @@
  * replacement, maintenance, inspection, or estimate requests.
  */
 
-import { ConversationSession, isSettled, LeadFields } from "../types";
+import { ConversationSession, isSettled, isTerminalStatus, LeadFields } from "../types";
 import { getServiceById, getServicesForTrade } from "../config/taxonomy";
 import { getLeadField } from "./field-merger";
 
@@ -49,30 +49,43 @@ const REQUEST_TYPE_DEFAULTS: Record<string, string[]> = {
  * Service and requestType requirements are determined dynamically.
  */
 export function getRequiredFields(session: ConversationSession): string[] {
-  const { trade, requestType, primaryService } = session;
+  const { trade, requestType, primaryService, intent, lookupStatus } = session;
 
-  // Start with base fields
-  const required = [...BASE_REQUIRED_FIELDS];
+  let required: string[] = [];
 
-  // Case 1: We have a primary service (the best case — most specific)
+  // 1. Reference ID
+  if ((intent === "COMPLAINT" || intent === "EXISTING_CUSTOMER") &&
+      lookupStatus !== "FOUND" && lookupStatus !== "CONFIRMED" && lookupStatus !== "REJECTED" && lookupStatus !== "NOT_FOUND") {
+    required.push("reference_id");
+  }
+
+  // 2. Service
+  // Always need to know what they are calling about before we ask for base fields,
+  // EXCEPT if they are just giving us a ticket number (but we'd be in FOUND state then)
+  if (!primaryService || !trade) {
+     required.push("service");
+  }
+
+  // 3. Base fields (skip if returning customer and we already have them, handled by field merging, but we can also avoid pushing them if returningCustomer is confirmed and they have an ID)
+  if (!session.returningCustomer) {
+    for (const f of BASE_REQUIRED_FIELDS) {
+      if (!required.includes(f)) required.push(f);
+    }
+  }
+
+  // Case 1: We have a primary service
   if (primaryService && trade) {
     const svcDef = getServiceById(trade, primaryService);
     if (svcDef) {
-      // Add service-specific required fields
       for (const field of svcDef.requiredFields) {
         if (!required.includes(field)) required.push(field);
       }
-      // requestType is now known via the service, so we don't need to ask for it separately
-      // service field itself is already captured (we have primaryService)
-      return required;
     }
+    return required;
   }
 
   // Case 2: We have requestType but no specific service yet
   if (requestType && requestType !== "UNKNOWN") {
-    // Need to know which service
-    if (!required.includes("service")) required.push("service");
-
     const defaults = REQUEST_TYPE_DEFAULTS[requestType] ?? ["problem", "urgency"];
     for (const f of defaults) {
       if (!required.includes(f)) required.push(f);
@@ -80,14 +93,7 @@ export function getRequiredFields(session: ConversationSession): string[] {
     return required;
   }
 
-  // Case 3: We know trade but not requestType or service
-  if (trade) {
-    required.push("service"); // ask for service which will determine everything else
-    return required;
-  }
-
-  // Case 4: We know nothing yet — just ask for service
-  required.push("service");
+  // Case 3/4: Handled since "service" is already pushed and there are no other knowns
   return required;
 }
 
@@ -117,7 +123,7 @@ export function getMissingRequiredFields(session: ConversationSession): string[]
       continue;
     }
 
-    if (!isSettled(fieldData.status)) {
+    if (!isTerminalStatus(fieldData.status)) {
       missing.push(fieldKey);
     }
   }

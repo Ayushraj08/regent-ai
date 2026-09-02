@@ -17,14 +17,28 @@ export function validateName(name: string | null): ValidationResult {
 
   // Reject single characters, numbers-only, or obviously non-name strings
   if (clean.length < 2) {
-    return { isValid: false, status: "INVALID", reason: "too_short" };
+    return { isValid: false, status: "INVALID", reason: "The name provided was too short to be a valid name" };
   }
-  if (!/[a-zA-Z]/.test(clean)) {
-    return { isValid: false, status: "INVALID", reason: "no_letters" };
+  if (!/\p{L}/u.test(clean)) {
+    return { isValid: false, status: "INVALID", reason: "The name provided did not contain any letters" };
   }
   // Reject very long strings that are probably utterances, not names (> 50 chars)
   if (clean.length > 60) {
-    return { isValid: false, status: "AMBIGUOUS", reason: "too_long" };
+    return { isValid: false, status: "AMBIGUOUS", reason: "I did not catch a clear name in that sentence" };
+  }
+
+  // Reject common NLU hallucinations
+  const blacklist = ["facing", "issue", "problem", "yes", "no", "yeah", "nope", "hello", "hi", "im", "i'm", "my"];
+  const words = clean.toLowerCase().replace(/[.,!?;:]/g, "").split(/\s+/);
+  
+  // If the extracted name contains ONLY blacklisted words (e.g. "facing" or "yes hi")
+  if (words.every(word => blacklist.includes(word))) {
+    return { isValid: false, status: "INVALID", reason: "I did not catch a valid human name in your previous response" };
+  }
+  
+  // If the extracted name STARTS with a blacklisted word, and it's 3 words or more, it's probably a whole sentence hallucinated as a name.
+  if (blacklist.includes(words[0]) && words.length >= 3) {
+    return { isValid: false, status: "AMBIGUOUS", reason: "I did not catch a clear name in your previous response" };
   }
 
   return { isValid: true, status: "CAPTURED", normalizedValue: clean };
@@ -52,40 +66,47 @@ export function validatePhone(phone: string | null): ValidationResult {
 
   // Any other digit count is invalid
   if (digits.length > 0) {
+    const reason = digits.length === 7 ? "I need a full 10-digit phone number including the area code" : `I received ${digits.length} digits, but I need a full 10-digit phone number`;
     return {
       isValid: false,
       status: "INVALID",
-      reason: `got ${digits.length} digits, need 10`
+      reason: reason
     };
   }
 
-  return { isValid: false, status: "MISSING", reason: "no_digits" };
+  return { isValid: false, status: "MISSING", reason: "I did not hear any numbers in your response" };
 }
 
 // ─── Address ──────────────────────────────────────────────────────────────────
 
 export function validateAddress(address: string | null): ValidationResult {
   if (!address || address.trim().length === 0) {
-    return { isValid: false, status: "MISSING", reason: "empty" };
+    return { isValid: false, status: "MISSING", reason: "I need your address to proceed, could you please share it?" };
   }
   const clean = address.trim();
 
-  // Single word like "Bihar", "Texas", "California" — city/state only, insufficient
   const wordCount = clean.split(/\s+/).length;
   const hasDigit = /\d/.test(clean);
 
   if (wordCount === 1) {
-    return { isValid: false, status: "AMBIGUOUS", reason: "single_word_only" };
+    return { isValid: false, status: "AMBIGUOUS", reason: "I need a complete street address, not just a single word" };
   }
 
   // Two-word state+city but no house number
   if (wordCount <= 2 && !hasDigit) {
-    return { isValid: false, status: "AMBIGUOUS", reason: "city_state_only" };
+    return { isValid: false, status: "AMBIGUOUS", reason: "I need a complete street address, not just the city and state" };
   }
 
   // Needs at least a number (street address)
   if (!hasDigit) {
-    return { isValid: false, status: "AMBIGUOUS", reason: "no_street_number" };
+    return { isValid: false, status: "AMBIGUOUS", reason: "I need the house number or zip code to complete your address" };
+  }
+  
+  // Phase 4: Detect missing city/zip. If it doesn't have a 5-digit zip or typical multi-part structure (like a comma)
+  const hasZip = /\b\d{5}\b/.test(clean);
+  const hasComma = clean.includes(",");
+  if (!hasZip && !hasComma && wordCount <= 4) {
+    return { isValid: false, status: "AMBIGUOUS", reason: "I need the city and zip code to complete your address" };
   }
 
   return { isValid: true, status: "CAPTURED", normalizedValue: clean };
@@ -174,4 +195,72 @@ export function validateRequestType(req: string | null): ValidationResult {
     return { isValid: false, status: "MISSING", reason: "empty" };
   }
   return { isValid: true, status: "CAPTURED", normalizedValue: req.trim().toUpperCase() };
+}
+
+// ─── Timing (Phase 3) ─────────────────────────────────────────────────────────
+
+export function validateTiming(timing: string | null): ValidationResult {
+  if (!timing || timing.trim().length === 0) {
+    return { isValid: false, status: "MISSING", reason: "empty" };
+  }
+  const clean = timing.trim().toLowerCase();
+  
+  // Basic relative date parsing logic
+  const now = new Date(); 
+  let targetDate = new Date(now);
+  let timeOfDay = "";
+
+  if (clean.includes("morning")) timeOfDay = "Morning";
+  else if (clean.includes("afternoon")) timeOfDay = "Afternoon";
+  else if (clean.includes("evening") || clean.includes("night") || clean.includes("tonight")) timeOfDay = "Evening";
+
+  const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  let resolved = false;
+  
+  if (clean.includes("tomorrow")) {
+    targetDate.setDate(targetDate.getDate() + 1);
+    resolved = true;
+  } else if (clean.includes("today") || clean.includes("tonight")) {
+    // targetDate is already today
+    resolved = true;
+  } else {
+    // Check for days of week
+    let foundDay = -1;
+    for (let i = 0; i < daysOfWeek.length; i++) {
+      if (clean.includes(daysOfWeek[i])) {
+        foundDay = i;
+        break;
+      }
+    }
+    
+    if (foundDay !== -1) {
+      const currentDay = targetDate.getDay();
+      let daysAhead = foundDay - currentDay;
+      // If it's the same day, or it explicitly says 'next', or the day already passed this week
+      if (daysAhead <= 0 || clean.includes("next")) {
+        daysAhead += 7; 
+      }
+      targetDate.setDate(targetDate.getDate() + daysAhead);
+      resolved = true;
+    }
+  }
+
+  if (!resolved && !timeOfDay) {
+    // If no relative day or time is found, just return it as captured
+    return { isValid: true, status: "CAPTURED", normalizedValue: timing.trim() };
+  }
+
+  // Format: "YYYY-MM-DD (DayOfWeek) TimeOfDay"
+  const formattedDate = targetDate.toISOString().split('T')[0];
+  const dayName = daysOfWeek[targetDate.getDay()];
+  const dayNameCapitalized = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+  
+  let result = resolved ? `${formattedDate} (${dayNameCapitalized})` : timing.trim();
+  if (resolved && timeOfDay) {
+    result += ` ${timeOfDay}`;
+  } else if (!resolved && timeOfDay) {
+    result = `${timeOfDay} (${timing.trim()})`;
+  }
+
+  return { isValid: true, status: "CAPTURED", normalizedValue: result };
 }

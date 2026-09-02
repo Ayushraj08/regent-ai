@@ -90,11 +90,12 @@ export function isFieldBlockedByLedger(
   if (!pending) return false;
 
   // Block if asked in the last turn (give the customer a chance to answer)
-  // Allow re-clarification after 2 turns of no answer
-  if (currentTurn - pending.turnAsked <= 1) return true;
-  if (pending.clarificationCount >= 2) return false; // allow re-ask after 2 clarifications
+  // If more than 1 turn has passed, they didn't answer it despite clarification, so unblock and ask again naturally.
+  if (currentTurn - pending.turnAsked <= 1) {
+    return true;
+  }
 
-  return true;
+  return false;
 }
 
 /**

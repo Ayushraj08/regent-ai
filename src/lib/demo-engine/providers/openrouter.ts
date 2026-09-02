@@ -65,14 +65,22 @@ JSON FORMAT:
   "behavior": "CALM",
   "confidence": 0.9,
   "extracted": {
+    "name": { "value": "Ayush", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "phone": { "value": "8955555565", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "address": { "value": "123 Main Street, New York", "status": "CAPTURED", "confidence": 0.95, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "problem": { "value": "AC is not cooling and the room is getting hotter", "status": "CAPTURED", "confidence": 0.95, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "urgency": { "value": "HIGH", "status": "CAPTURED", "confidence": 0.90, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
     "requestType": "INSTALLATION",
-    "service": "AC_INSTALLATION",
-    "name": { "value": "...", "status": "CAPTURED", "confidence": 0.9, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} }
+    "service": "AC_INSTALLATION"
   },
   "safety": { "status": "NORMAL", "category": null, "confidence": 0.99 },
   "isCorrection": false,
   "correctionField": null
-}`;
+}
+
+CRITICAL: When the customer describes a malfunction or symptom (e.g. "AC not cooling", "stopped working", "room getting hotter"), ALWAYS extract that as:
+  "problem": { "value": "<customer description>", "status": "CAPTURED", ... }
+Do NOT omit the problem field when the customer clearly describes a symptom.`;
 
     const prompt = `Current State: ${state}
 Known Lead Info: ${JSON.stringify(lead)}

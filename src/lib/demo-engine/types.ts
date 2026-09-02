@@ -5,10 +5,19 @@ import { z } from "zod";
 export const ConversationStateEnum = z.enum([
   "START",
   "COLLECTING",
-  "ISSUE_CONFIRMATION",
+  "READY_FOR_CONFIRMATION",
+  "AWAITING_ISSUE_CONFIRMATION",
+  "CONFIRMED",
+  "READY_FOR_TICKET",
+  "TICKET_CREATED",
+  "FINAL_REVIEW",
+  "WAITING_FOR_FINAL_INPUT",
+  "READY_TO_CLOSE",
   "CLOSING",
+  "CLOSED",
   "ESCALATED",
   "TRANSFER",
+  "CONFIRM_LOOKUP",
   "END"
 ]);
 export type ConversationState = z.infer<typeof ConversationStateEnum>;
@@ -16,15 +25,25 @@ export type ConversationState = z.infer<typeof ConversationStateEnum>;
 // ─── Action Types ─────────────────────────────────────────────────────────────
 
 export const ActionTypeEnum = z.enum([
-  "ASK_FIELD",
-  "CLARIFY",
-  "CONFIRM",
-  "CONTINUE",
-  "TRANSFER",
-  "ESCALATE",
-  "HANDLE_COMPLAINT",
-  "COMPLETE",
-  "CLOSE"
+  "ANSWER_QUESTION",
+  "ACKNOWLEDGE",
+  "CAPTURE_INFORMATION",
+  "CLARIFY_FIELD",
+  "VERIFY_INFORMATION",
+  "CONFIRM_REQUEST",
+  "UPDATE_REQUEST",
+  "IDENTIFY_RETURNING_CUSTOMER",
+  "RETRIEVE_EXISTING_REQUEST",
+  "CREATE_REQUEST",
+  "CREATE_TICKET",
+  "ADD_NOTE",
+  "MARK_URGENT",
+  "ESCALATE_SAFETY",
+  "HANDLE_HUMAN_REQUEST",
+  "CLOSE_CALL",
+  "WAIT_FOR_CUSTOMER",
+  "REVIEW_REQUIRED",
+  "RECOVERY"
 ]);
 export type ActionType = z.infer<typeof ActionTypeEnum>;
 
@@ -128,6 +147,11 @@ export function isSettled(status: FieldStatus): boolean {
   return SETTLED_STATUSES.includes(status);
 }
 
+// A set of statuses that indicate the field should no longer be asked
+export function isTerminalStatus(status: FieldStatus): boolean {
+  return isSettled(status) || status === "NOT_APPLICABLE" || status === "REFUSED" || status === "UNKNOWN";
+}
+
 // ─── Field Metadata ───────────────────────────────────────────────────────────
 
 export const FieldMetadataSchema = z.object({
@@ -138,13 +162,14 @@ export const FieldMetadataSchema = z.object({
   updatedTurn: z.number().default(0),  // Phase 1: when last updated
   // Legacy compat — keep 'turn' as an alias for updatedTurn
   turn: z.number().default(0).optional(),
-  updatedAt: z.string().optional()
+  updatedAt: z.string().optional(),
+  validationReason: z.string().optional() // Phase 4
 });
 export type FieldMetadata = z.infer<typeof FieldMetadataSchema>;
 
 /** Create a default empty field */
 export function emptyField(): FieldMetadata {
-  return { value: null, status: "MISSING", confidence: 0, sourceTurn: 0, updatedTurn: 0, turn: 0 };
+  return { value: null, status: "MISSING", confidence: 0, sourceTurn: 0, updatedTurn: 0, turn: 0, validationReason: undefined };
 }
 
 // ─── Safety ───────────────────────────────────────────────────────────────────
@@ -200,6 +225,7 @@ export const LeadFieldsSchema = z.object({
   timing: FieldMetadataSchema,     // Phase 1: when do they need service
   equipment: FieldMetadataSchema,  // Phase 1: what equipment is involved
   context: FieldMetadataSchema,    // Phase 1: additional context
+  reference_id: FieldMetadataSchema, // Phase 5: ticket/reference ID for existing customers
 });
 export type LeadFields = z.infer<typeof LeadFieldsSchema>;
 
@@ -218,6 +244,10 @@ export const ConversationSessionSchema = z.object({
   requestType: RequestTypeEnum.nullable().default(null),   // INSTALLATION, REPAIR, etc.
   primaryService: z.string().nullable().default(null),     // catalog ID e.g. "AC_INSTALLATION"
   additionalServices: z.array(z.string()).default([]),     // additional catalog IDs
+  
+  // Customer Identity
+  returningCustomer: z.boolean().default(false),
+  followUp: z.boolean().default(false),
 
   // Independent field state
   lead: LeadFieldsSchema,
@@ -233,7 +263,7 @@ export const ConversationSessionSchema = z.object({
   customerBehavior: BehaviorEnum.default("NEUTRAL"),
 
   // Derived state (updated each turn by the engine)
-  currentAction: ActionTypeEnum.default("CONTINUE"),
+  currentAction: ActionTypeEnum.default("ANSWER_QUESTION"),
   missingFields: z.array(z.string()).default([]),
 
   // History
@@ -241,16 +271,44 @@ export const ConversationSessionSchema = z.object({
   questionLedger: z.array(QuestionLedgerEntrySchema).default([]),
   conversationHistory: z.array(ConversationTurnSchema).default([]),
 
+  // Closing metrics
+  issueConfirmationCount: z.number().default(0),
+  anythingElsePromptCount: z.number().default(0),
+  offTopicCount: z.number().default(0),
+  fallbackLoopCount: z.number().default(0),
+  lastFallbackTarget: z.string().nullable().default(null),
+  finalizationStatus: z.enum(["IDLE", "IN_PROGRESS", "COMPLETE", "FAILED"]).default("IDLE"),
+
+  // DB Lookup (Existing Service / Complaint)
+  lookupStatus: z.enum(["IDLE", "SEARCHING", "FOUND", "NOT_FOUND", "CONFIRMED", "REJECTED"]).default("IDLE"),
+  lookupData: z.any().nullable().optional(), // Stores fetched ticket details
+
   // Dev diagnostics — never expose in production
   diagnosticReason: z.string().default(""),
 
+  // Identity / Context passed from telephony or UI
+  callerPhone: z.string().nullable().optional(),
+  callerTicketId: z.string().nullable().optional(),
+  recordingDisclosureGiven: z.boolean().default(false),
+
   // Legacy compat
-  ticketId: z.string().nullable().optional()
+  ticketId: z.string().nullable().optional(),
+
+  // Phase 5: Policy decision snapshot (optional, for diagnostics)
+  policyDecision: z.object({
+    serviceAreaStatus: z.string(),
+    businessStatus: z.string(),
+    afterHoursStatus: z.boolean(),
+    safetyStatus: z.string(),
+    serviceEligible: z.union([z.boolean(), z.null()]),
+    prohibitedClaims: z.array(z.string()),
+    allowedAction: z.string()
+  }).optional()
 });
 export type ConversationSession = z.infer<typeof ConversationSessionSchema>;
 
 /** Create an empty session for a given trade */
-export function makeEmptySession(trade: Trade | null, sessionId?: string): ConversationSession {
+export function makeEmptySession(trade: Trade | null, sessionId?: string, callerPhone?: string, callerTicketId?: string): ConversationSession {
   return {
     sessionId: sessionId ?? crypto.randomUUID(),
     turnCount: 0,
@@ -260,6 +318,8 @@ export function makeEmptySession(trade: Trade | null, sessionId?: string): Conve
     requestType: null,
     primaryService: null,
     additionalServices: [],
+    returningCustomer: false,
+    followUp: false,
     lead: {
       name: emptyField(),
       phone: emptyField(),
@@ -269,15 +329,26 @@ export function makeEmptySession(trade: Trade | null, sessionId?: string): Conve
       timing: emptyField(),
       equipment: emptyField(),
       context: emptyField(),
+      reference_id: emptyField(),
     },
     safety: { status: "NORMAL", category: null, confidence: 1.0 },
     customerBehavior: "NEUTRAL",
-    currentAction: "CONTINUE",
+    currentAction: "ANSWER_QUESTION",
     missingFields: [],
     corrections: [],
     questionLedger: [],
     conversationHistory: [],
-    diagnosticReason: ""
+    issueConfirmationCount: 0,
+    anythingElsePromptCount: 0,
+    offTopicCount: 0,
+    fallbackLoopCount: 0,
+    lastFallbackTarget: null,
+    finalizationStatus: "IDLE",
+    lookupStatus: "IDLE",
+    diagnosticReason: "",
+    callerPhone: callerPhone ?? null,
+    callerTicketId: callerTicketId ?? null,
+    recordingDisclosureGiven: false
   };
 }
 
@@ -298,6 +369,7 @@ export const NLUExtractedSchema = z.object({
   requestType: z.string().nullable().optional(),  // raw string, will be validated
   service: z.string().nullable().optional(),       // raw string / catalog ID candidate
   additionalService: z.string().nullable().optional(), // optional second service
+  reference_id: FieldMetadataSchema.optional(),
 });
 export type NLUExtracted = z.infer<typeof NLUExtractedSchema>;
 
@@ -331,9 +403,10 @@ export const EngineResponseSchema = z.object({
   state: ConversationStateEnum,
   missingFields: z.array(z.string()),
   safety: SafetySchema,
-  action: ActionTypeEnum,
-  targetField: z.string().optional(),
-  ticketId: z.string().nullable().optional(),
+  // Routing/Processing
+  currentAction: ActionTypeEnum.default("ANSWER_QUESTION"),
+  targetField: z.string().nullable().default(null),
+  diagnosticReason: z.string().nullable().default(null),
 });
 export type EngineResponse = z.infer<typeof EngineResponseSchema>;
 

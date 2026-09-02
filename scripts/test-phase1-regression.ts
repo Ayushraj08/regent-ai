@@ -202,7 +202,7 @@ test("§26: AC_INSTALLATION captured → ASK_FIELD(service) is impossible", () =
   };
   const resolution = resolveNextAction(session);
   assert(resolution.targetField !== "service", `Should not ask for service when primaryService=AC_INSTALLATION; got targetField=${resolution.targetField}`);
-  assert(resolution.action === "ASK_FIELD", `Should be asking for something; got ${resolution.action}`);
+  assert(resolution.action === "CAPTURE_INFORMATION", `Should be asking for something; got ${resolution.action}`);
   assert(resolution.targetField === "name" || resolution.targetField === "phone" || resolution.targetField === "address",
     `Should ask for name/phone/address next; got ${resolution.targetField}`);
 });
@@ -264,9 +264,9 @@ test("Address: 'New York' → AMBIGUOUS (city + state only)", () => {
   assertEq(r.status, "AMBIGUOUS", "address status");
 });
 
-test("Address: '123 Main Street' → CAPTURED", () => {
+test("Address: '123 Main Street' → AMBIGUOUS (missing city/zip)", () => {
   const r = validateAddress("123 Main Street");
-  assertEq(r.status, "CAPTURED", "address status");
+  assertEq(r.status, "AMBIGUOUS", "address status");
 });
 
 test("Name: 'Ayush' → CAPTURED", () => {

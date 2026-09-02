@@ -25,10 +25,11 @@ import {
   validateAddress,
   validateUrgency,
   validateProblem,
-  validateContext
+  validateContext,
+  validateTiming
 } from "./validators";
 
-type ValidatorFn = (v: string | null) => { isValid: boolean; status: FieldStatus; normalizedValue?: string };
+type ValidatorFn = (v: string | null) => { isValid: boolean; status: FieldStatus; normalizedValue?: string; reason?: string };
 
 const FIELD_VALIDATORS: Partial<Record<keyof LeadFields, ValidatorFn>> = {
   name: validateName,
@@ -37,9 +38,7 @@ const FIELD_VALIDATORS: Partial<Record<keyof LeadFields, ValidatorFn>> = {
   urgency: validateUrgency,
   problem: validateProblem,
   context: validateContext,
-  timing: (v) => v && v.trim().length > 0
-    ? { isValid: true, status: "CAPTURED", normalizedValue: v.trim() }
-    : { isValid: false, status: "MISSING" },
+  timing: validateTiming,
   equipment: (v) => v && v.trim().length > 0
     ? { isValid: true, status: "CAPTURED", normalizedValue: v.trim() }
     : { isValid: false, status: "MISSING" },
@@ -62,8 +61,8 @@ export function mergeField(
   const newValue = extracted.value?.trim() || null;
   const extractedStatus = extracted.status;
 
-  // Case 1: Explicit REFUSED or NOT_APPLICABLE — only accept if not already settled
-  if (!newValue && (extractedStatus === "REFUSED" || extractedStatus === "NOT_APPLICABLE")) {
+  // Case 1: Explicit REFUSED, NOT_APPLICABLE or UNKNOWN — only accept if not already settled
+  if (!newValue && (extractedStatus === "REFUSED" || extractedStatus === "NOT_APPLICABLE" || extractedStatus === "UNKNOWN")) {
     if (!isSettled(existing.status)) {
       return {
         updated: {
@@ -87,11 +86,13 @@ export function mergeField(
   const validator = FIELD_VALIDATORS[fieldKey as keyof LeadFields];
   let validatedValue = newValue;
   let validatedStatus: FieldStatus = extractedStatus ?? "CAPTURED";
+  let validatedReason: string | undefined = undefined;
 
   if (validator) {
     const result = validator(newValue);
     validatedValue = result.normalizedValue ?? newValue;
     validatedStatus = result.status;
+    validatedReason = result.reason;
   }
 
   // Case 4: Field was already settled — check if this is a correction
@@ -117,7 +118,8 @@ export function mergeField(
           confidence: extracted.confidence ?? 0.85,
           sourceTurn: existing.sourceTurn,
           updatedTurn: currentTurn,
-          turn: currentTurn
+          turn: currentTurn,
+          validationReason: validatedReason
         },
         correction
       };
@@ -135,7 +137,8 @@ export function mergeField(
       confidence: extracted.confidence ?? 0.85,
       sourceTurn,
       updatedTurn: currentTurn,
-      turn: currentTurn
+      turn: currentTurn,
+      validationReason: validatedReason
     },
     correction: null
   };

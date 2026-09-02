@@ -36,6 +36,8 @@ export class GeminiProvider implements LLMProvider {
         )
       : "Trade not specified";
 
+    const lastAskedField = request.session?.questionLedger?.slice(-1)[0]?.field || "none";
+
     const systemInstruction = `You are the Natural Language Understanding (NLU) layer for Regent, a home-services AI.
 Your ONLY job is to extract structured intent, behavior, lead fields, and safety flags from the customer's utterance.
 Do NOT decide the next state or response text — the State Controller handles that.
@@ -54,16 +56,22 @@ REPAIR, INSTALLATION, REPLACEMENT, MAINTENANCE, INSPECTION, DIAGNOSTIC, UPGRADE,
 BEHAVIORS:
 CALM, NEUTRAL, POSITIVE, CONFUSED, ANXIOUS, FRUSTRATED, ANGRY, RESISTANT, RUSHED, UNCERTAIN, DISTRESSED, HOSTILE, COOPERATIVE, UNCOOPERATIVE, TALKATIVE, MINIMAL, OFF_TOPIC
 
-EXTRACTION RULES (CRITICAL):
+- Service Catalog: ${catalogStr}
+- Target field we just asked for (if any): ${lastAskedField}
+
+RULES:
 1. SEPARATE intent vs requestType vs service:
    - "I need AC installation" → requestType=INSTALLATION, service=AC_INSTALLATION
    - "My AC stopped cooling" → requestType=REPAIR, service=AC_REPAIR
    - "I want to service my AC" → requestType=MAINTENANCE, service=AC_MAINTENANCE
-2. Map colloquial phrases to Catalog IDs using the aliases provided.
-3. Extract ALL fields mentioned in one utterance.
-4. OMIT fields NOT mentioned. Status: CAPTURED, REFUSED, UNKNOWN, NOT_APPLICABLE.
-5. Include confidence scores.
-6. Set isCorrection=true if the customer is correcting a previously given field.
+2. INTENT CLASSIFICATION: NEW_SERVICE_REQUEST, EXISTING_CUSTOMER, EMERGENCY, HUMAN_REQUEST, PRICE_QUESTION, HOURS_QUESTION, SERVICE_AREA_QUESTION, STATUS_QUESTION, CANCELLATION, RESCHEDULE, GENERAL_QUESTION, SOCIAL_QUESTION, COMPLAINT, WRONG_NUMBER, SPAM_OR_ABUSE, OFF_TOPIC, UNSURE, PROVIDE_INFORMATION, END_CALL, OTHER.
+3. If the user mentions prior service, a previous ticket, or speaking to an executive/agent before, ALWAYS set intent to EXISTING_CUSTOMER or COMPLAINT.
+4. Extract ALL fields mentioned in one utterance (name, phone, address, service, requestType, problem, urgency).
+5. OMIT fields NOT mentioned — do not fabricate. Status: CAPTURED, REFUSED, UNKNOWN, NOT_APPLICABLE.
+6. NAMES: Do NOT extract a name UNLESS the user explicitly provides one (e.g. "My name is John" or "I am Ayush") OR if we just asked for their name. Do NOT extract conversational fillers, verbs (e.g. "facing", "having", "yes"), or generic nouns (e.g. "issue") as names.
+7. PHONES: ALWAYS extract ANY sequence of digits the customer provides as their phone number, even if it is incomplete or too short.
+8. Include confidence scores (0.0–1.0).
+9. If customer corrects a field, set isCorrection=true and correctionField to the field being corrected.
 
 JSON FORMAT — return ONLY this structure:
 {
@@ -71,14 +79,22 @@ JSON FORMAT — return ONLY this structure:
   "behavior": "CALM",
   "confidence": 0.95,
   "extracted": {
-    "name": { "value": "Ayush", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "name": { "value": "John", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "phone": { "value": "8955555565", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "address": { "value": "123 Main Street, New York", "status": "CAPTURED", "confidence": 0.95, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "problem": { "value": "AC is not cooling and the room is getting hotter", "status": "CAPTURED", "confidence": 0.95, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "urgency": { "value": "HIGH", "status": "CAPTURED", "confidence": 0.90, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
     "requestType": "INSTALLATION",
     "service": "AC_INSTALLATION"
   },
   "safety": { "status": "NORMAL", "category": null, "confidence": 0.99 },
   "isCorrection": false,
   "correctionField": null
-}`;
+}
+
+CRITICAL: When the customer describes a malfunction or symptom (e.g. "AC not cooling", "stopped working", "room getting hotter"), ALWAYS extract that as:
+  "problem": { "value": "<customer description>", "status": "CAPTURED", ... }
+EVEN IF the customer is answering a different question (like confirming the service type), you MUST extract the problem if a symptom is mentioned. Do NOT omit it.`;
 
     const historyStr = request.conversationHistory
       ? request.conversationHistory.map((m: { role: string; content: string }) => `${m.role}: ${m.content}`).join('\n')

@@ -65,8 +65,10 @@ EXTRACTION RULES (CRITICAL):
 2. Map colloquial phrases to Catalog IDs using the aliases provided.
 3. Extract ALL fields mentioned in one utterance (name, phone, address, service, requestType, problem, urgency)
 4. OMIT fields NOT mentioned. Status: CAPTURED, REFUSED, UNKNOWN, NOT_APPLICABLE.
-5. Include confidence scores.
-6. Set isCorrection=true if the customer is correcting a previously given field.
+5. NAMES: Do NOT extract conversational fillers, verbs (e.g. "facing", "having", "yes", "no"), or generic nouns (e.g. "issue") as a name. Only extract true human names.
+6. PHONES: ALWAYS extract ANY sequence of digits the customer provides as their phone number, even if it is incomplete or too short.
+7. Include confidence scores.
+8. Set isCorrection=true if the customer is correcting a previously given field.
 
 JSON FORMAT — return ONLY this structure:
 {
@@ -75,13 +77,21 @@ JSON FORMAT — return ONLY this structure:
   "confidence": 0.95,
   "extracted": {
     "name": { "value": "Ayush", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "phone": { "value": "8955555565", "status": "CAPTURED", "confidence": 0.99, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "address": { "value": "123 Main Street, New York", "status": "CAPTURED", "confidence": 0.95, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "problem": { "value": "AC is not cooling and the room is getting hotter", "status": "CAPTURED", "confidence": 0.95, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
+    "urgency": { "value": "HIGH", "status": "CAPTURED", "confidence": 0.90, "sourceTurn": ${turnCount}, "updatedTurn": ${turnCount} },
     "requestType": "INSTALLATION",
     "service": "AC_INSTALLATION"
   },
   "safety": { "status": "NORMAL", "category": null, "confidence": 0.99 },
   "isCorrection": false,
   "correctionField": null
-}`;
+}
+
+CRITICAL: When the customer describes a malfunction or symptom (e.g. "AC not cooling", "stopped working", "room getting hotter"), ALWAYS extract that as:
+  "problem": { "value": "<customer description>", "status": "CAPTURED", ... }
+Do NOT omit the problem field when the customer clearly describes a symptom.`;
 
     const prompt = `Current State: ${state}
 Known Lead Info: ${JSON.stringify(lead)}
