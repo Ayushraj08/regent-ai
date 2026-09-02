@@ -28,11 +28,20 @@ if (process.env.ENABLE_OPENROUTER_DEV_FALLBACK === "true") {
   providers.push(new OpenRouterProvider("meta-llama/llama-3.1-8b-instruct"));
 }
 
+import { processRelagentTurn } from "./relagent-engine";
+
 const router = new ProviderRouter(providers, 3500); // 3.5s budget
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export async function processDemoUtterance(
+  request: EngineRequest,
+  turnId: string = crypto.randomUUID()
+): Promise<EngineResponse> {
+  return processRelagentTurn(request);
+}
+
+export async function processLegacyDemoUtterance(
   request: EngineRequest,
   turnId: string = crypto.randomUUID()
 ): Promise<EngineResponse> {

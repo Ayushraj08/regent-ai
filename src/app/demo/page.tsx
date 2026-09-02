@@ -55,6 +55,75 @@ function FieldDiagRow({ label, value, status }: { label: string; value: string |
   );
 }
 
+function FormattedMessageContent({
+  content,
+  role,
+}: {
+  content: string;
+  role: string;
+}) {
+  const lines = content.split("\n");
+  const isCustomer = role === "CUSTOMER";
+
+  return (
+    <div className="text-sm md:text-base leading-relaxed space-y-1.5">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return <div key={idx} className="h-1.5" />;
+        }
+
+        const isBullet =
+          trimmed.startsWith("- ") ||
+          trimmed.startsWith("• ") ||
+          trimmed.startsWith("* ");
+        const lineText = isBullet ? trimmed.replace(/^[-•*]\s*/, "") : trimmed;
+
+        // Parse **bold** parts
+        const parts = lineText.split(/(\*\*.*?\*\*)/g);
+
+        const renderedText = (
+          <span>
+            {parts.map((part, pIdx) => {
+              if (part.startsWith("**") && part.endsWith("**")) {
+                const boldText = part.slice(2, -2);
+                return (
+                  <strong
+                    key={pIdx}
+                    className={`font-semibold ${
+                      isCustomer ? "text-bone" : "text-obsidian"
+                    }`}
+                  >
+                    {boldText}
+                  </strong>
+                );
+              }
+              return <span key={pIdx}>{part}</span>;
+            })}
+          </span>
+        );
+
+        if (isBullet) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-2">
+              <span
+                className={`font-bold mt-0.5 ${
+                  isCustomer ? "text-cyan-400" : "text-blue-600"
+                }`}
+              >
+                •
+              </span>
+              <div className="flex-1">{renderedText}</div>
+            </div>
+          );
+        }
+
+        return <div key={idx}>{renderedText}</div>;
+      })}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DemoPage() {
@@ -473,7 +542,7 @@ export default function DemoPage() {
                     {m.role}
                     {m.fromVoice && <Mic className="w-2.5 h-2.5" />}
                   </span>
-                  <p className="text-sm md:text-base leading-relaxed">{m.content}</p>
+                  <FormattedMessageContent content={m.content} role={m.role} />
                 </div>
               </div>
             ))

@@ -275,6 +275,7 @@ export const ConversationSessionSchema = z.object({
   issueConfirmationCount: z.number().default(0),
   anythingElsePromptCount: z.number().default(0),
   offTopicCount: z.number().default(0),
+  abuseCount: z.number().default(0),
   fallbackLoopCount: z.number().default(0),
   lastFallbackTarget: z.string().nullable().default(null),
   finalizationStatus: z.enum(["IDLE", "IN_PROGRESS", "COMPLETE", "FAILED"]).default("IDLE"),
@@ -303,7 +304,20 @@ export const ConversationSessionSchema = z.object({
     serviceEligible: z.union([z.boolean(), z.null()]),
     prohibitedClaims: z.array(z.string()),
     allowedAction: z.string()
-  }).optional()
+  }).optional(),
+
+  // Phase 5: Mood & Bad Experience Diagnostics
+  moodDiagnostics: z.object({
+    sentimentTag: z.enum(["angry", "happy", "neutral"]).default("neutral"),
+    whyCustomerIsUpset: z.string().nullable().default(null),
+    situationContextNotes: z.string().nullable().default(null),
+    recommendedNextAction: z.string().nullable().default(null),
+  }).default({
+    sentimentTag: "neutral",
+    whyCustomerIsUpset: null,
+    situationContextNotes: null,
+    recommendedNextAction: null,
+  }),
 });
 export type ConversationSession = z.infer<typeof ConversationSessionSchema>;
 
@@ -341,6 +355,7 @@ export function makeEmptySession(trade: Trade | null, sessionId?: string, caller
     issueConfirmationCount: 0,
     anythingElsePromptCount: 0,
     offTopicCount: 0,
+    abuseCount: 0,
     fallbackLoopCount: 0,
     lastFallbackTarget: null,
     finalizationStatus: "IDLE",
@@ -348,7 +363,13 @@ export function makeEmptySession(trade: Trade | null, sessionId?: string, caller
     diagnosticReason: "",
     callerPhone: callerPhone ?? null,
     callerTicketId: callerTicketId ?? null,
-    recordingDisclosureGiven: false
+    recordingDisclosureGiven: false,
+    moodDiagnostics: {
+      sentimentTag: "neutral",
+      whyCustomerIsUpset: null,
+      situationContextNotes: null,
+      recommendedNextAction: null,
+    },
   };
 }
 

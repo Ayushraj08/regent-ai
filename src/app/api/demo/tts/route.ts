@@ -12,6 +12,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "API Key missing" }, { status: 401 });
     }
 
+    // Clean text for natural speech synthesis (strip markdown asterisks, raw bullets, and multiple dots)
+    const cleanSpeechText = text
+      .replace(/\*\*(.*?)\*\*/g, "$1") // strip **bold**
+      .replace(/\*(.*?)\*/g, "$1") // strip *italic*
+      .replace(/^[\s•\-*]+\s*/gm, "") // strip leading bullet characters
+      .replace(/\.{3,}/g, ".") // strip long ellipsis
+      .replace(/\s+/g, " ") // normalize spacing
+      .trim();
+
     // Call ElevenLabs TTS Streaming API
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
@@ -23,7 +32,7 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          text,
+          text: cleanSpeechText,
           model_id: "eleven_turbo_v2_5", // low latency model
           voice_settings: {
             stability: 0.5,
