@@ -190,17 +190,26 @@ export function inferTrade(text: string): string | null {
   const lower = text.toLowerCase();
 
   const hvacSignals = [
-    "ac", "air conditioner", "air conditioning", "hvac", "furnace",
-    "heating", "cooling", "thermostat", "heat pump", "ductwork", "duct"
+    "air conditioner", "air conditioning", "hvac", "furnace",
+    "heating", "cooling system", "central ac", "thermostat", "heat pump", "ductwork", "duct"
   ];
   const plumbingSignals = [
-    "plumb", "plumber", "pipe", "drain", "water heater", "toilet", "faucet",
+    "water cooler", "water dispenser", "plumb", "plumber", "pipe", "drain", "water heater", "toilet", "faucet",
     "leak", "leaking", "sewer", "clog", "clogged", "flood", "sump"
   ];
   const electricalSignals = [
     "electric", "electrician", "outlet", "breaker", "panel", "wiring", "wire",
     "light", "lighting", "switch", "generator", "ev charger", "power"
   ];
+
+  // Water cooler / water dispenser check directly
+  if (lower.includes("water cooler") || lower.includes("water dispenser")) {
+    return "PLUMBING";
+  }
+  // Standalone "ac" signal (word-boundary to avoid partial matches)
+  if (/\bac\b/i.test(lower)) {
+    hvacSignals.push("ac");
+  }
 
   const hvacScore = hvacSignals.filter(s => lower.includes(s)).length;
   const plumbingScore = plumbingSignals.filter(s => lower.includes(s)).length;
@@ -209,6 +218,7 @@ export function inferTrade(text: string): string | null {
   const max = Math.max(hvacScore, plumbingScore, electricalScore);
   if (max === 0) return null;
 
+  if (plumbingScore === max && lower.includes("cooler")) return "PLUMBING";
   if (hvacScore === max) return "HVAC";
   if (plumbingScore === max) return "PLUMBING";
   return "ELECTRICAL";

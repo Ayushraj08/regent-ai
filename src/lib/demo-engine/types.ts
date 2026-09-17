@@ -119,6 +119,14 @@ export const BehaviorEnum = z.enum([
 ]);
 export type Behavior = z.infer<typeof BehaviorEnum>;
 
+// ─── Module 5: Emotional Sentiment State & Caller Style ───────────────────────
+
+export const SentimentStateEnum = z.enum(["empathetic", "urgent", "calm", "warm"]);
+export type SentimentState = z.infer<typeof SentimentStateEnum>;
+
+export const CallerStyleEnum = z.enum(["rushed", "elderly_confused", "angry_frustrated", "neutral"]);
+export type CallerStyle = z.infer<typeof CallerStyleEnum>;
+
 // ─── Field Status ─────────────────────────────────────────────────────────────
 
 export const FieldStatusEnum = z.enum([
@@ -237,6 +245,9 @@ export const ConversationSessionSchema = z.object({
   sessionId: z.string(),
   turnCount: z.number().default(0),
   state: ConversationStateEnum,
+  tenantId: z.string().nullable().default("b0000000-0000-0000-0000-000000000001"),
+  businessId: z.string().nullable().default("b0000000-0000-0000-0000-000000000001"),
+  customerId: z.string().nullable().optional(),
 
   // First-class dimensions (separate from lead fields)
   intent: IntentEnum.nullable().default(null),
@@ -275,6 +286,7 @@ export const ConversationSessionSchema = z.object({
   issueConfirmationCount: z.number().default(0),
   anythingElsePromptCount: z.number().default(0),
   offTopicCount: z.number().default(0),
+  oos_strike_count: z.number().default(0),
   abuseCount: z.number().default(0),
   fallbackLoopCount: z.number().default(0),
   lastFallbackTarget: z.string().nullable().default(null),
@@ -318,13 +330,20 @@ export const ConversationSessionSchema = z.object({
     situationContextNotes: null,
     recommendedNextAction: null,
   }),
+
+  // Module 5: Psychological Style & Emotional Vocal State
+  sentimentState: SentimentStateEnum.default("warm"),
+  callerStyle: CallerStyleEnum.default("neutral"),
 });
 export type ConversationSession = z.infer<typeof ConversationSessionSchema>;
 
 /** Create an empty session for a given trade */
-export function makeEmptySession(trade: Trade | null, sessionId?: string, callerPhone?: string, callerTicketId?: string): ConversationSession {
+export function makeEmptySession(trade: Trade | null, sessionId?: string, callerPhone?: string, callerTicketId?: string, tenantId?: string): ConversationSession {
   return {
     sessionId: sessionId ?? crypto.randomUUID(),
+    tenantId: tenantId ?? "b0000000-0000-0000-0000-000000000001",
+    businessId: tenantId ?? "b0000000-0000-0000-0000-000000000001",
+    customerId: null,
     turnCount: 0,
     state: "START",
     intent: null,
@@ -355,6 +374,7 @@ export function makeEmptySession(trade: Trade | null, sessionId?: string, caller
     issueConfirmationCount: 0,
     anythingElsePromptCount: 0,
     offTopicCount: 0,
+    oos_strike_count: 0,
     abuseCount: 0,
     fallbackLoopCount: 0,
     lastFallbackTarget: null,
@@ -370,6 +390,8 @@ export function makeEmptySession(trade: Trade | null, sessionId?: string, caller
       situationContextNotes: null,
       recommendedNextAction: null,
     },
+    sentimentState: "warm",
+    callerStyle: "neutral",
   };
 }
 
@@ -391,6 +413,10 @@ export const NLUExtractedSchema = z.object({
   service: z.string().nullable().optional(),       // raw string / catalog ID candidate
   additionalService: z.string().nullable().optional(), // optional second service
   reference_id: FieldMetadataSchema.optional(),
+
+  // Module 5 emotional state parameters
+  sentiment_state: SentimentStateEnum.optional(),
+  caller_style: CallerStyleEnum.optional(),
 });
 export type NLUExtracted = z.infer<typeof NLUExtractedSchema>;
 
@@ -412,6 +438,7 @@ export type NLUResponse = z.infer<typeof NLUResponseSchema>;
 export const EngineRequestSchema = z.object({
   session: ConversationSessionSchema,
   utterance: z.string(),
+  isInterrupted: z.boolean().optional().default(false),
 });
 export type EngineRequest = z.infer<typeof EngineRequestSchema>;
 
@@ -428,8 +455,17 @@ export const EngineResponseSchema = z.object({
   currentAction: ActionTypeEnum.default("ANSWER_QUESTION"),
   targetField: z.string().nullable().default(null),
   diagnosticReason: z.string().nullable().default(null),
+  // Module 5: Emotional Voice Synthesis State
+  sentimentState: SentimentStateEnum.default("warm"),
+  callerStyle: CallerStyleEnum.default("neutral"),
+  // Fix 4: Surface ticket ID to frontend immediately (no DB poll needed)
+  ticketId: z.string().nullable().optional(),
+  // Native Tool Calling: Surface tool calls (e.g. end_call) to voice pipeline / client
+  toolCalls: z.array(z.any()).optional(),
 });
-export type EngineResponse = z.infer<typeof EngineResponseSchema>;
+export type EngineResponse = z.infer<typeof EngineResponseSchema> & {
+  toolCalls?: any[];
+};
 
 // ─── Legacy types (kept for backward compat in older scripts) ─────────────────
 

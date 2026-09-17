@@ -370,6 +370,22 @@ const PLUMBING_SERVICES: ServiceDefinition[] = [
     relevantDiagnosticQuestions: []
   },
   {
+    id: "WATER_COOLER",
+    displayName: "Water Cooler / Dispenser Service",
+    trade: "PLUMBING",
+    supportedRequestTypes: ["REPAIR", "INSTALLATION", "MAINTENANCE", "DIAGNOSTIC", "GENERAL_SERVICE"],
+    requiredFields: ["problem", "urgency"],
+    optionalFields: ["timing"],
+    aliases: [
+      "water cooler", "water cooler repair", "cooler", "water dispenser",
+      "cooler not working", "water cooler broken", "water cooler noise",
+      "water cooler noisy", "cooler leaking", "water fountain",
+      "drinking fountain", "bottle dispenser", "cooler repair"
+    ],
+    clarificationHints: ["Is the water cooler leaking, making noise, or not cooling?"],
+    relevantDiagnosticQuestions: ["Is water flowing from the cooler?", "Is it making an unusual noise?"]
+  },
+  {
     id: "OTHER_PLUMBING",
     displayName: "Other Plumbing Service",
     trade: "PLUMBING",

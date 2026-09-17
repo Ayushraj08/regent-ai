@@ -335,6 +335,8 @@ function buildEngineResponse(
     currentAction: session.currentAction,
     targetField: getTargetField(session) || null,
     diagnosticReason: session.diagnosticReason,
+    sentimentState: session.sentimentState || "warm",
+    callerStyle: session.callerStyle || "neutral",
   };
 }
 
